@@ -8,7 +8,7 @@ from schemas.profiles import ProfileCreateSchema, ProfileResponseSchema
 from validation import validate_image
 
 from config.dependencies import get_s3_storage_client, S3StorageInterface
-
+from config.dependencies import get_current_user
 
 
 router = APIRouter()
@@ -18,75 +18,50 @@ router = APIRouter()
     "/users/{user_id}/profile/",
     response_model=ProfileResponseSchema,
     status_code=status.HTTP_201_CREATED,
-    summary="Create user profile",
-    description="Create profile with avatar upload to S3 storage. Only allowed for the owner or admin.",
 )
 async def create_user_profile(
-    user_id: int = Path(...),
+    user_id: int = Path(..., description="User ID"),
     first_name: Annotated[str, Form()],
     last_name: Annotated[str, Form()],
     gender: Annotated[str, Form()],
     date_of_birth: Annotated[str, Form()],
     info: Annotated[str, Form()],
     avatar: UploadFile = Form(...),
-    current_user: UserModel = Depends(UserModel),
+    current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     s3_client: S3StorageInterface = Depends(get_s3_storage_client),
 ):
-
     if current_user.id != user_id and not current_user.has_group("admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to edit this profile."
-        )
+        raise HTTPException(status_code=403, detail="You don't have permission to edit this profile.")
 
     stmt = select(UserModel).where(UserModel.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
-
     if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or not active."
-        )
+        raise HTTPException(status_code=401, detail="User not found or not active.")
 
     if user.profile:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already has a profile."
-        )
+        raise HTTPException(status_code=400, detail="User already has a profile.")
 
     try:
         validate_image(avatar)
         filename = f"{user_id}_avatar.{avatar.filename.split('.')[-1]}"
         avatar_url = await s3_client.upload_file(file=avatar, object_name=f"avatars/{filename}")
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload avatar. Please try again later."
-        )
-
-    profile_data = ProfileCreateSchema(
-        first_name=first_name,
-        last_name=last_name,
-        gender=gender,
-        date_of_birth=date_of_birth,
-        info=info,
-        avatar=avatar
-    )
+        raise HTTPException(status_code=500, detail="Failed to upload avatar. Please try again later.")
 
     profile = UserProfileModel(
         user_id=user_id,
-        first_name=profile_data.first_name,
-        last_name=profile_data.last_name,
-        gender=profile_data.gender,
-        date_of_birth=profile_data.date_of_birth,
-        info=profile_data.info,
-        avatar=avatar_url
+        first_name=first_name,
+        last_name=last_name,
+        gender=gender,
+        date_of_birth=date.fromisoformat(date_of_birth),
+        info=info,
+        avatar=avatar_url,
     )
-
     db.add(profile)
     await db.commit()
     await db.refresh(profile)
 
     return ProfileResponseSchema.model_validate(profile)
+

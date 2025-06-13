@@ -16,7 +16,6 @@ class ProfileCreateSchema(BaseModel):
     gender: str
     date_of_birth: date
     info: str = Field(..., min_length=1)
-    avatar: UploadFile
 
     @field_validator("first_name")
     @classmethod
