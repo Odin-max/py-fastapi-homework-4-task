@@ -6,6 +6,7 @@ from typing import Annotated
 from database import get_db, UserModel, UserProfileModel
 from schemas.profiles import ProfileCreateSchema, ProfileResponseSchema
 from validation import validate_image
+from datetime import date
 
 from config.dependencies import get_s3_storage_client, S3StorageInterface
 from config.dependencies import get_current_user
